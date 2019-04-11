@@ -1,0 +1,220 @@
+---
+title: "North Carolina's 9th Congressional District"
+author: "Dasha Metropolitansky"
+date: "February 18, 2019"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r include = FALSE}
+library(readr)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(gt)
+
+#Reading in the CSV file
+
+poll = read_csv("ps_4_elections-poll-nc09-3.csv")
+```
+
+###Answering questions about the data
+
+```{r include = FALSE}
+
+#Filtering then counting poll responses for Democrats
+
+dem_supporters = poll %>%
+  filter(response == "Dem") %>%
+  count()
+```
+There were `r dem_supporters[1,1]` respondents who supported the Democratic candidate.
+
+```{r include = FALSE}
+
+#Filtering and grouping responses for Republicans and Undecided, counting the total for each group, then subtracting the totals
+
+rep_vs_und = poll %>%
+  filter(response %in% c("Rep", "Und")) %>%
+  group_by(response) %>%
+  count()
+```
+There were `r rep_vs_und[1,2] - rep_vs_und[2,2]` more respondents who favored the Republican candidate than who were Undecided.
+
+```{r include = FALSE}
+
+#Filtering for cases where the observation in gender does not equal the one in gender_combined, then counting these cases
+
+gender_diff = poll %>%
+  filter(gender != gender_combined) %>%
+  count()
+```
+There are two gender variables (`gender` and `gender_combined`). There are `r gender_diff[1,1]` individuals for whom these variables have different values.
+
+```{r include = FALSE}
+
+#Filtering for cases which meet the conditions in the question, then counting these cases
+
+white = poll %>%
+  filter(race_eth == "White" & file_race_black != "White") %>%
+  count() 
+```
+There are `r white[1,1]` respondents listed as “White” under `race_eth` who are not listed as “White” under `file_race_black`. 
+
+```{r include = FALSE}
+
+#Filtering for responses only for Democrats and Republicans and grouping by response
+#Finding the lowest (i.e. earliest) timestamp for each group (Dem and Rep) 
+#Converting observations (Dem and Rep) into columns (keys) and the lowest timestamp into the observation (values)
+#Calculating the difference in time between the first Republican and Democrat responses 
+
+times = poll %>%
+  filter(response %in% c("Dem", "Rep")) %>% 
+  group_by(response) %>%
+  summarize(min = min(timestamp)) %>%
+  spread(key = response, value = min) %>%
+  mutate(diff = round(Rep - Dem, digits = 0))
+```
+The first `response` of Dem came `r times[1,3]` minutes (rounded to the nearest minute) before the first response of Rep. 
+
+###Breaking down polling responses by respondent's race
+
+```{r echo = FALSE, message = FALSE}
+
+#Cleaning the data: selecting the relevant variables, filtering out "Do not read" values, and reorganizing the levels corresponding to races to match those on the original graph
+
+poll %>%
+  select(response, race_eth, final_weight) %>%
+  filter(race_eth != "[DO NOT READ] Don't know/Refused", 
+         response %in% c("Dem", "Rep", "Und", 3)) %>%
+  mutate(race_eth = fct_relevel(race_eth, c("White", "Black", "Hispanic", "Asian", "Other"))) %>%
+  
+#Grouping the data by race and party response, calculating the weighted total, and converting observations to variables (i.e. Response = Dem, Rep, Und) and the respective weighted total as observations
+  
+  group_by(race_eth, response) %>%
+  summarize(total = sum(final_weight)) %>%
+  
+  #Setting missing values to 0. Without this, when performing calculations later in the code (lines 87-90), NA values would make the final result NA.  
+  
+  spread(key = response, value = total, fill = 0) %>% 
+  ungroup() %>%
+  
+#Calculating the proportion of Dem, Rep, and Und responses relative to the total number of responses
+  
+  mutate(all = Dem + Rep + Und + `3`) %>%
+  mutate(Dem = Dem/all) %>%
+  mutate(Rep = Rep/all) %>%
+  mutate(Und = Und/all) %>%
+  
+#Selecting all variables except for "all" and the "3" responses 
+  
+  select(-all, -`3`) %>% 
+  
+#If a 0 is present (i.e. no data available), change it to NA. Later in the code (line 98), we replace missing data (NA) with a "-" to copy the original graph.
+  
+  na_if(0) %>% 
+  gt() %>%
+  tab_header(title = "North Carolina’s 9th Congressional District", 
+             subtitle = "2018 3rd wave polling data broken down by race") %>%
+  cols_label(Dem = "DEM.", Rep = "REP.", Und = "UND.", race_eth = " ") %>%
+
+#Converting the graph's observations to percentages and rounding to 0 decimal places (whole numbers)
+  
+  fmt_percent(columns = vars(Dem, Rep, Und), decimals = 0) %>%   
+  
+#Replacing missing text with "-"
+  
+  fmt_missing(columns = 4, rows = 4, missing_text = "-") %>% 
+  
+#Formatting the colour of the cells to copy the original graph
+  
+  tab_style(style = cells_styles(bkgd_color = "white"),
+            locations = cells_data(columns = vars(race_eth))) %>%
+  tab_style(style = cells_styles(bkgd_color = "#ECECEC"),
+            locations = cells_data(columns = vars(Dem, Rep, Und))) %>%
+  tab_style(style = cells_styles(bkgd_color = "red", text_color = "white"),
+            locations = cells_data(columns = vars(Rep), rows = Rep > Dem)) %>%
+  tab_style(style = cells_styles(bkgd_color = "blue", text_color = "white"),
+            locations = cells_data(columns = vars(Dem), rows = Dem > Rep)) %>% 
+  tab_source_note(md("Source: New York Times Upshot/Siena College 2018 live polls"))
+```
+
+###Visualizing polling weights by education level
+
+```{r echo = FALSE, message = FALSE}
+
+poll %>%
+  filter(educ != "[DO NOT READ] Refused") %>%   
+
+#Reorganizing the levels corresponding to education to match those on the original
+  
+  mutate(educ = fct_relevel(educ, c("Grade school", 
+                                    "High school", 
+                                    "Some college or trade school",
+                                    "Bachelors' degree", 
+                                    "Graduate or Professional Degree"))) %>%
+  group_by(educ) %>%
+  ggplot(aes(x = educ, y = final_weight)) + 
+
+#Flipping the x and y axes
+    
+  coord_flip() +     
+
+#Plotting a violin graph
+    
+  geom_violin() +    
+
+#Shifting the plotted data points slightly (with random variation) and decreasing the transparency to see their overlap
+    
+  geom_jitter(alpha = 0.5, size = 1) +   
+  theme_gray() + 
+  labs(title = "More Educated Matters Less in North Carolina 9th",
+       subtitle = "Poll gives more weight to people who are less likely to participate in polls",
+       caption = "New York Times Upshot/Siena College 2018 live polls") + 
+  xlab(element_blank()) +
+  ylab("Weight Given to Respondent in Calculating Poll Results")
+```
+
+###Visualizing party support by respondent's race and gender
+
+```{r echo = FALSE, message = FALSE}
+
+#Creating a bar graph breaking down the support for each party (Democrats, Republicans, or Undecided) by gender within each age group
+
+poll %>%
+
+#Selecting the relevant variables
+  
+  select(response, gender, ager) %>%   
+
+#Filtering out "Do not read" observations from the age variable and "3" observations from the response variable
+  
+  filter(ager != "[DO NOT READ] Refused", 
+         response %in% c("Dem", "Rep", "Und")) %>%    
+  group_by(gender, response, ager) %>%
+
+#Calculating the total number of responses for each option (Rep, Dem, Und) within each combination of gender and age group
+  
+  summarize(total = n()) %>%    
+  ggplot(aes(x = response, y = total, fill = gender)) +
+
+#Columns are placed side by side
+  
+  geom_col(position = "dodge2") +   
+  labs(title = "Party Support In North Carolina's 9th District by Age and Gender", 
+       fill = "Gender", 
+       caption = "Source: New York Times Upshot/Siena College 2018 live polls") +
+  xlab(element_blank()) + 
+  ylab("Number of Responses") +
+
+#Flipping the x and y axes for better visibility
+  
+  coord_flip() +    
+
+#Creating separate graphs of responses broken down gender for each of the age groups
+  
+  facet_wrap(~ager)     
+```
