@@ -178,7 +178,7 @@ poll %>%
   ylab("Weight Given to Respondent in Calculating Poll Results")
 ```
 
-###Visualizing party support by respondent's race and gender
+###Visualizing party support by respondent's age and gender
 
 ```{r echo = FALSE, message = FALSE}
 
